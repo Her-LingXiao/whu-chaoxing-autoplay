@@ -82,6 +82,9 @@ const log = (msg) => {
 
 // ── 进程锁：防止多个实例同时操控同一个浏览器 ─────────────────────────────
 function acquireLock() {
+  // --list 是只读的（只扫描章节目录，不碰播放器），不该被锁挡住，
+  // 否则「连播进行中想知道进度」这个最常见的排错场景反而用不了 --list。
+  if (LIST_ONLY) return;
   if (!FORCE) {
     try {
       const old = parseInt(fs.readFileSync(LOCK, 'utf8').trim(), 10);
