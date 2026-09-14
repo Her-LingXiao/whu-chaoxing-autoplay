@@ -41,6 +41,7 @@
  *   node autoplay.js --list           # 只列出扫描到的章节及完成状态（不播放，排错用）
  *   node autoplay.js --start 2.5      # 从 2.5 这一节开始（含之后的未完成章节）
  *   node autoplay.js --all            # 不跳过已完成章节（从头重播）
+ *   node autoplay.js --stop-at 98     # 每节播到 98% 才切下一节（默认 98，即「只剩最后 2%」）
  *   node autoplay.js --no-wait        # 每节只播几秒，快速验证用
  *   node autoplay.js --max-min 240    # 全局最多连播 240 分钟（默认 300）
  *   node autoplay.js --force          # 忽略进程锁强制启动
@@ -62,6 +63,13 @@ const LIST_ONLY = ARGS.includes('--list');
 const ALL = ARGS.includes('--all');
 const FORCE = ARGS.includes('--force');
 const MAX_MIN = parseInt(getArg('--max-min', '300'), 10);
+// 每节播到多少百分比才切下一节。默认 98 =「只剩最后 2% 不播」。
+// 平台记任务点的门槛是 90%，所以 98% 一定达标，且留 2% 余量（避免片尾自动弹窗/结束事件干扰）。
+const STOP_AT = (() => {
+  const v = parseFloat(getArg('--stop-at', '98'));
+  return Number.isFinite(v) ? Math.min(100, Math.max(1, v)) : 98;
+})();
+const STOP_RATIO = STOP_AT / 100;
 const LOG = path.join(__dirname, 'autoplay.log');
 const LOCK = path.join(__dirname, 'autoplay.lock');
 
@@ -286,7 +294,7 @@ async function openAndPlay(ctx, prevSrc, budgetMs) {
   return null;
 }
 
-// 等本节播到 ≥90% / 结束
+// 等本节播到 ≥ STOP_AT%（默认 98%，即只剩最后 2%）/ 播放结束
 async function waitWatched(ctx, src, capMs) {
   const t0 = Date.now();
   let maxRatio = 0, lastCt = -1, lastAdvance = Date.now();
@@ -296,7 +304,7 @@ async function waitWatched(ctx, src, capMs) {
       if (src && pv.src && pv.src !== src) { src = pv.src; lastCt = -1; }
       if (pv.d > 0) maxRatio = Math.max(maxRatio, pv.ct / pv.d);
       if (pv.ct > lastCt + 0.4) { lastCt = pv.ct; lastAdvance = Date.now(); }
-      if (pv.d > 0 && pv.ct / pv.d >= 0.9) return 'reached-90%';
+      if (pv.d > 0 && pv.ct / pv.d >= STOP_RATIO) return 'reached-' + STOP_AT + '%';
       if (pv.ended) return 'ended';
       if (pv.paused) { await startPlayback(pv.frame); lastAdvance = Date.now(); }
       else if (Date.now() - lastAdvance > 90000) {
@@ -313,8 +321,8 @@ async function waitWatched(ctx, src, capMs) {
 (async () => {
   acquireLock();
   try { fs.writeFileSync(LOG, ''); } catch (e) {}
-  log('=== autoplay start (v1.2.0) ===');
-  log(`start=${START || '(first-unfinished)'} course=${COURSE || '(current page)'} noWait=${NO_WAIT} list=${LIST_ONLY} skipCompleted=${!ALL} maxMin=${MAX_MIN}`);
+  log('=== autoplay start (v1.3.0) ===');
+  log(`start=${START || '(first-unfinished)'} course=${COURSE || '(current page)'} noWait=${NO_WAIT} list=${LIST_ONLY} skipCompleted=${!ALL} stopAt=${STOP_AT}% maxMin=${MAX_MIN}`);
 
   let browser;
   try {
@@ -395,7 +403,15 @@ async function waitWatched(ctx, src, capMs) {
     const active = await waitActive(ctx, next, 8000);
     if (!active && next.nodeId) log('  · 未观测到激活态（可能点击未生效，继续尝试播放）');
 
-    const pv = await openAndPlay(ctx, prevSrc, 30000);
+    let pv = await openAndPlay(ctx, prevSrc, 30000);
+    if (!pv) {
+      // 有些节因为播放器 iframe 重载慢，首次在 30s 内等不到「新 src」，
+      // 会被误判成「本节无视频」而整节跳过（实测 3.2 就中过招）。
+      // 兜底：重新点一次本节，再给 45s。
+      log('  · 首次未等到新视频，重新点击本节再试…');
+      await clickChapter(ctx, next);
+      pv = await openAndPlay(ctx, prevSrc, 45000);
+    }
     if (!pv) {
       log('  ⚠ 本节无视频（测验/文档），跳过。');
       continue;

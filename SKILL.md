@@ -3,7 +3,7 @@ name: chaoxing-autoplay
 description: "Auto-play (muted) course videos on 超星学习通 / 珞珈在线 / 智慧珞珈 via the real Chrome browser over CDP. Skips chapters already marked 已完成 and resumes from the first unwatched one. Useful for WHU students who need to finish 毛概 / 电路 / any chaoxing course videos hands-free."
 description_zh: "通过本机谷歌浏览器（CDP 远程控制）自动静音连播超星学习通 / 珞珈在线 / 智慧珞珈 的课程视频，自动跳过已完成章节"
 description_en: "Muted auto-play of chaoxing/luojia course videos by driving the real Chrome browser over CDP; skips completed chapters"
-version: 1.2.0
+version: 1.3.0
 homepage: https://whu.edu.cn
 metadata: {"clawdbot": {"emoji": "📺", "requires": {"bins": ["node", "google-chrome"], "npm": ["playwright-core"]}, "install": [{"id": "npm", "kind": "npm", "pkg": "playwright-core", "label": "Install playwright-core (npm i playwright-core)"}]}}
 display_name: "chaoxing-autoplay"
@@ -62,6 +62,7 @@ visibility: "public"
    node autoplay.js                 # 默认：跳过已完成，从第一节没看过的开始连播
    node autoplay.js --start 3.2     # 从指定小节开始（之后的未完成章节继续）
    node autoplay.js --all           # 不跳过已完成章节，从头全部重播
+   node autoplay.js --stop-at 98    # 每节播到 98% 再切下一节（默认 98，即「只剩最后 2%」）
    node autoplay.js --list          # 只列出章节目录 + 完成状态，不播放（排错首选）
    node autoplay.js --no-wait       # 不等待播完，每节只播几秒（快速验证用）
    node autoplay.js --max-min 240   # 全局最多连播 240 分钟就停（默认 300）
@@ -69,6 +70,7 @@ visibility: "public"
    node diag.js                     # 诊断：打印章节目录 + 当前播放器状态
    ```
    - 进度实时写入 `autoplay.log`。
+   - **每节播到 98% 才切下一节**（`--stop-at` 可调）：实测**播到 90% 平台不一定记「已完成」**，所以默认留最后 2% 不播，确保稳稳达标。
    - **默认跳过已完成章节**：读目录里的 `span.icon_Completed`（悬停显示「已完成」）标记，不再每次从 1.1 重播。
    - 章节列表在多层 iframe 里（`studentcourse` / `studentstudy`），脚本会自动发现，无需你关心。
    - 遇到「章节测试 / 文档」等无视频项会自动跳过（**测验要你自己做**）。
@@ -84,6 +86,14 @@ visibility: "public"
 详见同目录 `README.md`。
 
 ## 关键实现细节（v1.1.0 / v1.2.0 踩坑记录，改前必读）
+
+### v1.3.0：切节阈值
+
+原来是写死的 `0.9`（90%）。实测发现**播到 90% 平台不一定会记「已完成」**——3.1 / 3.3 / 3.4 / 3.5 都在 90% 处被切走，重新扫描章节目录时仍然没有 `icon_Completed` 标记，而播到接近片尾的 2.5 却立刻变「已完成」。
+
+所以阈值改为可配置的参数 `--stop-at`，**默认 98%**（即「只剩最后 2% 不播」）：既稳定达标，又留 2% 余量避开片尾的结束事件/弹窗。
+
+另外一个同类误判：**播放器 iframe 重载慢时，首次 30s 内等不到新 `src` 会被判成「本节无视频」而整节跳过**（实测 3.2 实际有 548 秒视频却被跳过）。现在会重新点击本节再等 45s，仍等不到才判无视频。
 
 ### v1.2.0：怎么判断「这节看没看过」
 
