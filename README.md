@@ -81,6 +81,17 @@
    cd scripts && npm install playwright-core
    ```
 3. 你本人已完成登录（见下）。
+4. **电脑不能进入睡眠 / 待机**，否则 Chrome 与脚本都会被系统挂起，播放立即中断。
+
+   - **仅熄屏（显示器关闭）不影响播放** —— 视频是静音的，屏幕黑着照样播；
+   - 真正会中断的是**睡眠 / 待机（S0 连接待机 / S3）**；
+   - Windows 上把「插电时自动待机」关掉（只影响交流电，电池行为不变）：
+     ```bash
+     powercfg /change standby-timeout-ac 0     # 0 = 永不休眠
+     powercfg /q SCHEME_CURRENT SUB_SLEEP STANDBYIDLE   # 复核，AC 显示 0x00000000 即生效
+     ```
+   - 想还原：`powercfg /change standby-timeout-ac 15`。
+   - 笔记本**合盖**通常也会进入待机，长时间挂机请接电源、别合盖。
 
 ## 快速开始
 
@@ -182,6 +193,10 @@ chaoxing-autoplay/
 > `scripts/node_modules/`（约 14MB，仅 `playwright-core`）与 `autoplay.log` / `autoplay.lock` 等运行时产物已通过 `.gitignore` 排除，克隆后执行 `npm install` 还原即可。
 
 ## 版本历史
+
+**v1.3.1**
+
+- 文档补充：**电脑进入睡眠 / 待机会中断播放**（Chrome 与 node 进程被系统挂起），前置条件里加了关闭「插电自动待机」的说明；仅熄屏不影响。
 
 **v1.3.0**
 

@@ -3,7 +3,7 @@ name: chaoxing-autoplay
 description: "Auto-play (muted) course videos on 超星学习通 / 珞珈在线 / 智慧珞珈 via the real Chrome browser over CDP. Skips chapters already marked 已完成 and resumes from the first unwatched one. Useful for WHU students who need to finish 毛概 / 电路 / any chaoxing course videos hands-free."
 description_zh: "通过本机谷歌浏览器（CDP 远程控制）自动静音连播超星学习通 / 珞珈在线 / 智慧珞珈 的课程视频，自动跳过已完成章节"
 description_en: "Muted auto-play of chaoxing/luojia course videos by driving the real Chrome browser over CDP; skips completed chapters"
-version: 1.3.0
+version: 1.3.1
 homepage: https://whu.edu.cn
 metadata: {"clawdbot": {"emoji": "📺", "requires": {"bins": ["node", "google-chrome"], "npm": ["playwright-core"]}, "install": [{"id": "npm", "kind": "npm", "pkg": "playwright-core", "label": "Install playwright-core (npm i playwright-core)"}]}}
 display_name: "chaoxing-autoplay"
@@ -47,6 +47,10 @@ visibility: "public"
    - Windows：`powershell -ExecutionPolicy Bypass -File <skill>/scripts/launch_chrome.ps1`
    - macOS/Linux：`bash <skill>/scripts/launch_chrome.sh`
    > 脚本会先关掉当前 Chrome 再带调试端口重启（登录信息仍在，只是关掉已开的标签页）。若 9222 端口已开着则**直接复用，不会重启**。
+4. **电脑必须保持唤醒**：进入睡眠 / 待机会让 Chrome 和 node 进程一起被挂起，播放中断。
+   - 只是**熄屏不影响**（视频静音播放，屏幕黑着照播）；要防的是**睡眠 / 待机**。
+   - Windows 关掉插电自动待机：`powercfg /change standby-timeout-ac 0`（仅交流电，电池行为不变）。
+   - 笔记本合盖一般也会待机，挂机时请接电源并保持开盖。
 
 ## 完整流程
 
