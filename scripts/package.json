@@ -1,0 +1,9 @@
+{
+  "name": "chaoxing-autoplay-scripts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Muted auto-play of chaoxing/luojia course videos via Chrome CDP",
+  "dependencies": {
+    "playwright-core": "^1.0.0"
+  }
+}

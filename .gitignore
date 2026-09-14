@@ -1,0 +1,23 @@
+# ---- 依赖（体积大，用 npm install 还原）----
+node_modules/
+
+# ---- 运行时产物 ----
+scripts/autoplay.log
+scripts/autoplay.lock
+scripts/*.out
+*.log
+*.lock
+*.out
+
+# ---- 操作系统 / 编辑器 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# ---- 本地私有配置（防止误提交登录态/路径）----
+*.local
+*.local.*
+.env
+.env.*
