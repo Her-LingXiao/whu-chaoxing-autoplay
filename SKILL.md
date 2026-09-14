@@ -3,7 +3,7 @@ name: chaoxing-autoplay
 description: "Auto-play (muted) course videos on 超星学习通 / 珞珈在线 / 智慧珞珈 via the real Chrome browser over CDP. Skips chapters already marked 已完成 and resumes from the first unwatched one. Useful for WHU students who need to finish 毛概 / 电路 / any chaoxing course videos hands-free."
 description_zh: "通过本机谷歌浏览器（CDP 远程控制）自动静音连播超星学习通 / 珞珈在线 / 智慧珞珈 的课程视频，自动跳过已完成章节"
 description_en: "Muted auto-play of chaoxing/luojia course videos by driving the real Chrome browser over CDP; skips completed chapters"
-version: 1.3.1
+version: 1.4.0
 homepage: https://whu.edu.cn
 metadata: {"clawdbot": {"emoji": "📺", "requires": {"bins": ["node", "google-chrome"], "npm": ["playwright-core"]}, "install": [{"id": "npm", "kind": "npm", "pkg": "playwright-core", "label": "Install playwright-core (npm i playwright-core)"}]}}
 display_name: "chaoxing-autoplay"
@@ -67,14 +67,16 @@ visibility: "public"
    node autoplay.js --start 3.2     # 从指定小节开始（之后的未完成章节继续）
    node autoplay.js --all           # 不跳过已完成章节，从头全部重播
    node autoplay.js --stop-at 98    # 每节播到 98% 再切下一节（默认 98，即「只剩最后 2%」）
+   node autoplay.js --settle-ms 25000 # 到阈值后原地多停 25s 再切节（默认 25000，0 = 关闭）
    node autoplay.js --list          # 只列出章节目录 + 完成状态，不播放（排错首选）
    node autoplay.js --no-wait       # 不等待播完，每节只播几秒（快速验证用）
    node autoplay.js --max-min 240   # 全局最多连播 240 分钟就停（默认 300）
    node autoplay.js --force         # 忽略进程锁强制启动（确认没有别的实例在跑）
    node diag.js                     # 诊断：打印章节目录 + 当前播放器状态
    ```
-   - 进度实时写入 `autoplay.log`。
+   - 进度实时写入 `autoplay.log`（上一轮会另存为 `autoplay.prev.log`）。
    - **每节播到 98% 才切下一节**（`--stop-at` 可调）：实测**播到 90% 平台不一定记「已完成」**，所以默认留最后 2% 不播，确保稳稳达标。
+   - **到阈值后还要原地停 25s**（`--settle-ms`，v1.4.0）：给播放器留出向平台上报进度的窗口，否则会被漏记「已完成」——见下文「v1.4.0：结算等待」。这 25 秒视频仍在播，不是干等。
    - **默认跳过已完成章节**：读目录里的 `span.icon_Completed`（悬停显示「已完成」）标记，不再每次从 1.1 重播。
    - 章节列表在多层 iframe 里（`studentcourse` / `studentstudy`），脚本会自动发现，无需你关心。
    - 遇到「章节测试 / 文档」等无视频项会自动跳过（**测验要你自己做**）。
@@ -89,7 +91,37 @@ visibility: "public"
 4. `node autoplay.js` 即可。
 详见同目录 `README.md`。
 
-## 关键实现细节（v1.1.0 / v1.2.0 踩坑记录，改前必读）
+## 关键实现细节（踩坑记录，改前必读）
+
+### v1.4.0：结算等待 —— 到阈值后别立刻切节
+
+**这是「播到 98% 却没被记「已完成」」的真正原因，不是阈值不够。**
+
+实测证据：同一门课、同一批操作、同样播到 98%，结果却不一致 ——
+`3.1 / 3.2 / 3.3 / 4.4` 被平台标记为「已完成」，而 `3.4 / 3.5 / 4.3` 没有。
+
+机制：视频到达阈值后，**播放器还要把最后一段观看进度上报给平台**，上报有延迟。
+旧版一到阈值就立刻点击下一节，播放器被切走，这次上报就丢了。
+
+修法：`waitWatched()` 返回 `reached-<N>%` 后，主循环**原地 `sleep(SETTLE_MS)`**（默认 25000ms，
+播放不中断）再切节。日志会多两行：
+
+```
+本节结果: reached-98%
+  · 已到 98%，原地结算等待 25s（给平台留上报窗口）…
+  · 结算后进度: 470/479 = 98%
+```
+
+另两条同批修掉的：
+
+- **`--list` 不得写运行日志**。v1.3.2 放开进程锁后，`--list` 仍会执行启动时的
+  `fs.writeFileSync(LOG,'')`，把正在连播实例的日志清空 —— 排错时非常误导。
+  现在 `log()` 在 `LIST_ONLY` 下只打终端、不落文件。
+- **启动时把上一轮日志 `rename` 成 `autoplay.prev.log`**，而不是直接丢弃（日志被清空过一次，吃了亏）。
+
+⚠️ **章节目录的「已完成」标记不是实时的**：它只在点击章节（触发 `getTeacherAjax`）时重新拉取，
+所以刚播完的章节可能要等下一节被点击后才变绿；`--list` 读到的是上一次刷新的快照。
+不要据此判断「刚才那节到底记上没有」，隔一两分钟再看一次。
 
 ### v1.3.0：切节阈值
 

@@ -1,6 +1,17 @@
 /**
  * autoplay.js — 超星学习通 / 珞珈在线 课程视频自动静音连播
- * v1.2.0
+ * v1.4.0
+ *
+ * ── v1.4.0（2026-09-14 晚）───────────────────────────────────────────────
+ *  • **结算等待（关键）**：到达 --stop-at（默认 98%）后不再立刻点下一节，而是
+ *    原地多停留 --settle-ms（默认 25s）让播放器把最后一段进度上报给平台。
+ *    原因：实测「播到阈值就立刻切走」会导致平台**不一定记「已完成」**——
+ *    同一批次里 3.1/3.2/3.3/4.4 被记上了，3.4/3.5/4.3 没有，是非确定性的
+ *    漏报，不是阈值不够。切节前留出上报窗口即可大幅降低漏报。
+ *  • **--list 不再碰运行日志**：原来它也会执行 `writeFileSync(LOG,'')`，
+ *    把正在连播的实例日志清空（v1.3.2 放开锁之后引入的副作用）。
+ *  • 启动时把上一轮日志另存为 autoplay.prev.log，不再直接丢弃历史。
+ *  • 日志里的版本号改为常量，不再写死。
  *
  * ── v1.2.0 新增（2026-09-14）──────────────────────────────────────────────
  *  • 读章节目录里的「已完成」标记（span.icon_Completed），默认跳过已完成章节，
@@ -42,6 +53,7 @@
  *   node autoplay.js --start 2.5      # 从 2.5 这一节开始（含之后的未完成章节）
  *   node autoplay.js --all            # 不跳过已完成章节（从头重播）
  *   node autoplay.js --stop-at 98     # 每节播到 98% 才切下一节（默认 98，即「只剩最后 2%」）
+ *   node autoplay.js --settle-ms 25000 # 到阈值后原地停留多少毫秒再切节（默认 25000，0 = 不等待）
  *   node autoplay.js --no-wait        # 每节只播几秒，快速验证用
  *   node autoplay.js --max-min 240    # 全局最多连播 240 分钟（默认 300）
  *   node autoplay.js --force          # 忽略进程锁强制启动
@@ -70,13 +82,23 @@ const STOP_AT = (() => {
   return Number.isFinite(v) ? Math.min(100, Math.max(1, v)) : 98;
 })();
 const STOP_RATIO = STOP_AT / 100;
+// 到达 STOP_AT 后原地停留多久（毫秒）再切下一节 —— 给播放器留出向平台上报进度的窗口。
+// 实测：到点就立刻切走会被平台漏记「已完成」，故默认留 25s，可用 --settle-ms 0 关掉。
+const SETTLE_MS = (() => {
+  const v = parseInt(getArg('--settle-ms', '25000'), 10);
+  return Number.isFinite(v) && v >= 0 ? v : 25000;
+})();
+const VERSION = '1.4.0';
 const LOG = path.join(__dirname, 'autoplay.log');
+const PREV_LOG = path.join(__dirname, 'autoplay.prev.log');
 const LOCK = path.join(__dirname, 'autoplay.lock');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// --list 是只读的：只打到终端，**不写运行日志**，免得把正在连播那一路的记录搅混。
 const log = (msg) => {
   const line = `[${new Date().toISOString()}] ${msg}`;
   console.log(line);
+  if (LIST_ONLY) return;
   try { fs.appendFileSync(LOG, line + '\n'); } catch (e) {}
 };
 
@@ -323,9 +345,13 @@ async function waitWatched(ctx, src, capMs) {
 
 (async () => {
   acquireLock();
-  try { fs.writeFileSync(LOG, ''); } catch (e) {}
-  log('=== autoplay start (v1.3.0) ===');
-  log(`start=${START || '(first-unfinished)'} course=${COURSE || '(current page)'} noWait=${NO_WAIT} list=${LIST_ONLY} skipCompleted=${!ALL} stopAt=${STOP_AT}% maxMin=${MAX_MIN}`);
+  if (!LIST_ONLY) {
+    // 把上一轮日志留一份（排错常要回看），而不是直接清掉
+    try { fs.renameSync(LOG, PREV_LOG); } catch (e) {}
+    try { fs.writeFileSync(LOG, ''); } catch (e) {}
+  }
+  log(`=== autoplay start (v${VERSION}) ===`);
+  log(`start=${START || '(first-unfinished)'} course=${COURSE || '(current page)'} noWait=${NO_WAIT} list=${LIST_ONLY} skipCompleted=${!ALL} stopAt=${STOP_AT}% settleMs=${SETTLE_MS} maxMin=${MAX_MIN}`);
 
   let browser;
   try {
@@ -425,6 +451,18 @@ async function waitWatched(ctx, src, capMs) {
       log('  (no-wait) 已确认播放，切下一节。');
     } else {
       const res = await waitWatched(ctx, pv.src, 40 * 60 * 1000);
+      // 结算等待（v1.4.0）：到阈值后不要立刻点下一节，原地多留 SETTLE_MS 毫秒，
+      // 让播放器把「已看到 ≥阈值」的最后一段进度上报给平台。
+      // 否则会出现「播到 98% 却没被记「已完成」」——实测同一批里 3.1/3.2/3.3/4.4
+      // 记上了，3.4/3.5/4.3 没记上，属于切节太快导致的非确定性漏报。
+      if (/^reached-/.test(res) && SETTLE_MS > 0) {
+        log(`  · 已到 ${STOP_AT}%，原地结算等待 ${Math.round(SETTLE_MS / 1000)}s（给平台留上报窗口）…`);
+        await sleep(SETTLE_MS);
+        const now = await findPlayerVideo(ctx);
+        if (now && now.d > 0) {
+          log(`  · 结算后进度: ${Math.round(now.ct)}/${Math.round(now.d)} = ${Math.round((now.ct / now.d) * 100)}%`);
+        }
+      }
       log('  本节结果: ' + res);
     }
   }

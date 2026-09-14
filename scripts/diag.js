@@ -69,6 +69,13 @@ const isChaoxing = (u) => /chaoxing|whu\.edu\.cn/.test(u || '');
           const noVid = NO_VIDEO_TITLE.test(c.text) ? '  [无视频?]' : '';
           console.log(`${String(i + 1).padStart(3)}. ${c.text}${tag}${noVid}\n     id=${c.id} knowledgeId=${c.knowledgeId}`);
         });
+        // 紧凑汇总：一眼看清进度
+        const num = (x) => (x.text.match(/^[\d.]+/) || ['?'])[0];
+        console.log('\n--- 汇总 ---');
+        console.log('已完成: ' + (list.filter((x) => x.completed).map(num).join(' ') || '(无)'));
+        console.log('未完成: ' + list.filter((x) => !x.completed).map(num).join(' '));
+        console.log('第一节未完成 = ' + (list.find((x) => !x.completed) || {}).text);
+        console.log('⚠ 这些标记是「上一次点击章节时」从服务器拉取的快照，不是实时值；刚播完的章节可能还没变绿。');
       }
     }
   }
